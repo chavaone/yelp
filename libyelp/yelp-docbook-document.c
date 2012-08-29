@@ -98,8 +98,6 @@ G_DEFINE_TYPE (YelpDocbookDocument, yelp_docbook_document, YELP_TYPE_DOCUMENT);
 
 typedef struct _YelpDocbookDocumentPrivate  YelpDocbookDocumentPrivate;
 struct _YelpDocbookDocumentPrivate {
-    YelpUri       *uri;
-
     DocbookState   state;
 
     GMutex         mutex;
@@ -174,11 +172,6 @@ yelp_docbook_document_dispose (GObject *object)
     gint i;
     YelpDocbookDocumentPrivate *priv = GET_PRIV (object);
 
-    if (priv->uri) {
-        g_object_unref (priv->uri);
-        priv->uri = NULL;
-    }
-
     if (priv->monitors != NULL) {
         for (i = 0; priv->monitors[i]; i++) {
             g_object_unref (priv->monitors[i]);
@@ -214,20 +207,15 @@ yelp_docbook_document_new (YelpUri *uri)
 {
     YelpDocbookDocument *docbook;
     YelpDocbookDocumentPrivate *priv;
-    gchar *doc_uri;
     gchar **path;
     gint path_i;
 
     g_return_val_if_fail (uri != NULL, NULL);
 
-    doc_uri = yelp_uri_get_document_uri (uri);
     docbook = (YelpDocbookDocument *) g_object_new (YELP_TYPE_DOCBOOK_DOCUMENT,
-                                                    "document-uri", doc_uri,
+                                                    "document-uri", uri,
                                                     NULL);
-    g_free (doc_uri);
     priv = GET_PRIV (docbook);
-
-    priv->uri = g_object_ref (uri);
 
     path = yelp_uri_get_search_path (uri);
     priv->monitors = g_new0 (GFileMonitor*, g_strv_length (path) + 1);
@@ -243,7 +231,6 @@ yelp_docbook_document_new (YelpUri *uri)
         g_object_unref (file);
     }
     g_strfreev (path);
-
     return (YelpDocument *) docbook;
 }
 
@@ -292,7 +279,7 @@ docbook_request_page (YelpDocument         *document,
         break;
     case DOCBOOK_STATE_PARSED:
     case DOCBOOK_STATE_STOP:
-        docuri = yelp_uri_get_document_uri (priv->uri);
+        docuri = yelp_uri_get_document_uri (yelp_document_get_uri (document));
         error = g_error_new (YELP_ERROR, YELP_ERROR_NOT_FOUND,
                              _("The page ‘%s’ was not found in the document ‘%s’."),
                              page_id, docuri);
@@ -326,7 +313,7 @@ docbook_process (YelpDocbookDocument *docbook)
 
     debug_print (DB_FUNCTION, "entering\n");
 
-    file = yelp_uri_get_file (priv->uri);
+    file = yelp_uri_get_file (yelp_document_get_uri (document));
     if (file == NULL) {
         error = g_error_new (YELP_ERROR, YELP_ERROR_NOT_FOUND,
                              _("The file does not exist."));
@@ -366,7 +353,7 @@ docbook_process (YelpDocbookDocument *docbook)
                                  XML_PARSE_DTDLOAD | XML_PARSE_NOCDATA |
                                  XML_PARSE_NOENT   | XML_PARSE_NONET   )
         < 0) {
-        error = g_error_new (YELP_ERROR, YELP_ERROR_PROCESSING, 
+        error = g_error_new (YELP_ERROR, YELP_ERROR_PROCESSING,
                              _("The file ‘%s’ could not be parsed because"
                                " one or more of its included files is not"
                                " a well-formed XML document."),
@@ -577,7 +564,7 @@ docbook_walk (YelpDocbookDocument *docbook)
         }
         else {
             xmlNewProp (priv->xmlcur, BAD_CAST "id", BAD_CAST autoidstr);
-            id = xmlGetProp (priv->xmlcur, BAD_CAST "id"); 
+            id = xmlGetProp (priv->xmlcur, BAD_CAST "id");
         }
     }
 
@@ -686,7 +673,6 @@ static gchar *
 docbook_walk_get_title (YelpDocbookDocument *docbook,
                         xmlNodePtr           cur)
 {
-    YelpDocbookDocumentPrivate *priv = GET_PRIV (docbook);
     gchar *infoname = NULL;
     xmlNodePtr child = NULL;
     xmlNodePtr title = NULL;
@@ -838,6 +824,7 @@ transform_finished (YelpTransform       *transform,
                     YelpDocbookDocument *docbook)
 {
     YelpDocbookDocumentPrivate *priv = GET_PRIV (docbook);
+    YelpDocument *document = YELP_DOCUMENT (docbook);
     gchar *docuri;
     GError *error;
 
@@ -859,7 +846,7 @@ transform_finished (YelpTransform       *transform,
                        (GWeakNotify) transform_finalized,
                        docbook);
 
-    docuri = yelp_uri_get_document_uri (priv->uri);
+    docuri = yelp_uri_get_document_uri (yelp_document_get_uri (document));
     error = g_error_new (YELP_ERROR, YELP_ERROR_NOT_FOUND,
                          _("The requested page was not found in the document ‘%s’."),
                          docuri);
@@ -895,7 +882,7 @@ transform_finalized (YelpDocbookDocument *docbook,
                      gpointer             transform)
 {
     YelpDocbookDocumentPrivate *priv = GET_PRIV (docbook);
- 
+
     debug_print (DB_FUNCTION, "entering\n");
 
     if (priv->xmldoc)
@@ -927,7 +914,6 @@ static void
 docbook_index_node (DocbookIndexData *index)
 {
     xmlNodePtr oldcur, child;
-    YelpDocbookDocumentPrivate *priv = GET_PRIV (index->docbook);
 
     if ((g_str_equal (index->cur->parent->name, "menuchoice") ||
          g_str_equal (index->cur->parent->name, "keycombo")) &&
@@ -957,7 +943,6 @@ docbook_index_chunk (DocbookIndexData *index)
     xmlNodePtr child;
     gchar *title = NULL;
     GSList *chunks = NULL;
-    YelpDocbookDocumentPrivate *priv = GET_PRIV (index->docbook);
 
     id = xmlGetProp (index->cur, BAD_CAST "id");
     if (id != NULL) {
@@ -981,6 +966,7 @@ docbook_index_chunk (DocbookIndexData *index)
     }
 
     if (id != NULL) {
+        YelpDocument *document = YELP_DOCUMENT (index->docbook);
         YelpUri *uri;
         gchar *full_uri, *tmp, *body;
 
@@ -988,7 +974,7 @@ docbook_index_chunk (DocbookIndexData *index)
         index->str = NULL;
 
         tmp = g_strconcat ("xref:", id, NULL);
-        uri = yelp_uri_new_relative (priv->uri, tmp);
+        uri = yelp_uri_new_relative (yelp_document_get_uri (document), tmp);
         g_free (tmp);
         yelp_uri_resolve_sync (uri);
         full_uri = yelp_uri_get_canonical_uri (uri);
@@ -1025,16 +1011,18 @@ docbook_index_threaded (YelpDocbookDocument *docbook)
     xmlParserCtxtPtr parserCtxt = NULL;
     GFile *file = NULL;
     gchar *filename = NULL;
+    YelpUri *uri;
     YelpDocbookDocumentPrivate *priv = GET_PRIV (docbook);
 
-    file = yelp_uri_get_file (priv->uri);
+    uri = yelp_document_get_uri (YELP_DOCUMENT (docbook));
+    file = yelp_uri_get_file (uri);
     if (file == NULL)
         goto done;
     filename = g_file_get_path (file);
 
     index = g_new0 (DocbookIndexData, 1);
     index->docbook = docbook;
-    index->doc_uri = yelp_uri_get_document_uri (priv->uri);
+    index->doc_uri = yelp_uri_get_document_uri (uri);
 
     parserCtxt = xmlNewParserCtxt ();
     index->doc = xmlCtxtReadFile (parserCtxt, filename, NULL,
