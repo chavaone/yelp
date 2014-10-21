@@ -42,6 +42,13 @@ AC_SUBST([YELP_CFLAGS])
 AC_SUBST([YELP_LIBS])
 
 
+PKG_CHECK_MODULES(YELP_EXTENSION,
+[
+	webkit2gtk-web-extension-4.0 >= 2.7.2
+])
+AC_SUBST(YELP_EXTENSION_CFLAGS)
+AC_SUBST(YELP_EXTENSION_LIBS)
+
 GNOME_DEBUG_CHECK
 GNOME_COMPILE_WARNINGS([maximum])
 GNOME_MAINTAINER_MODE_DEFINES
@@ -236,6 +243,7 @@ data/xslt/man2html.xsl
 data/xslt/yelp-common.xsl
 po/Makefile.in
 tests/Makefile
+libyelp/web-extension/Makefile
 yelp.desktop.in
 ])
 
